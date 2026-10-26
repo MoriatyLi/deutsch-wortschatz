@@ -15,7 +15,7 @@ resources = [
     (str(root / name), "app_resources")
     for name in ("app.py", "vocab.py", "providers.py", "lexicon.py",
                  "offline_dictionary.py", "prepare_offline.py", "obsidian.py",
-                 "export_obsidian.py")
+                 "export_obsidian.py", "offline_tts.py")
 ]
 resources += [
     (str(root / ".streamlit" / "config.toml"), "app_resources/.streamlit"),
@@ -33,7 +33,7 @@ a = Analysis(
                   ["webview", "webview.platforms.edgechromium", "webview.platforms.winforms",
                    "clr", "clr_loader", "pythonnet", "bottle", "proxy_tools",
                    "providers", "lexicon", "offline_dictionary", "prepare_offline",
-                   "obsidian", "export_obsidian"],
+                   "obsidian", "export_obsidian", "offline_tts"],
     hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=["pytest", "tkinter"],
     noarchive=False, optimize=1,
 )

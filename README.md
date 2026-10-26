@@ -44,6 +44,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
 
 离线查词不会为新词自动下载录音。多个读音、缺失 IPA、没有中文释义等情况会明确保留，需结合原文校对。见 [离线说明](docs/OFFLINE_GUIDE.md)。
 
+## 本地德语语音（资源安装在 D 盘）
+
+没有真人录音时，可使用 eSpeak NG 的德语声音 `de` 在本机合成 WAV。合成不需要联网，已有真人录音优先保留。规则合成的声音较机械，重音和同形异音仍需核对。
+
+将语言资源安装到一个有写权限的 D 盘目录，例如：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --no-deps --target "D:\BaiduNetdiskDownload\DeutschWortschatz\Speech" --cache-dir "D:\BaiduNetdiskDownload\DeutschWortschatz\pip-cache" espeakng-loader==0.2.4
+```
+
+在侧栏填写“本地德语语音目录（D盘）”并启用自动生成。新增词条会自动补音，已有词可点击“补全缺失的离线读音”。生成的 WAV 保存在个人词库的 `audio/`，可以随 Obsidian 单词表导出。语音引擎及语言数据留在 D 盘，不打入 C 盘的应用依赖目录。
+
 ## Obsidian 单词表
 
 1. 在侧栏“Obsidian 单词表”中填写目标 `.md` 文件完整路径，必须位于已有的 Obsidian Vault 中。

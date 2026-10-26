@@ -11,6 +11,8 @@ from providers import HttpClient, Providers
 from vocab import BASE_DIR, Store, Vocabulary
 from offline_dictionary import stats as dictionary_stats
 from prepare_offline import activate as activate_offline
+from offline_tts import (DEFAULT_SPEECH_PATH, available as speech_available,
+    ensure_audio, fill_missing, clear_missing_audio_warnings)
 
 st.set_page_config(page_title='Deutsch Wortschatz · 德语词库', page_icon='📖', layout='wide')
 DATA_DIR = Path(os.environ.get('DEUTSCH_VOCAB_DATA_DIR', BASE_DIR / 'data'))
@@ -50,6 +52,17 @@ def sync_after_edit(row, force=False):
     return messages
 
 
+def local_pronunciation(row):
+    if store.get_setting('offline_speech', '1') != '1':
+        return row, False, []
+    try:
+        row, changed = ensure_audio(store, row, DATA_DIR / 'audio',
+            store.get_setting('offline_speech_path') or DEFAULT_SPEECH_PATH)
+        return row, changed, []
+    except (OSError, ValueError, RuntimeError) as exc:
+        return row, False, [f'本地德语发音未生成：{exc}']
+
+
 with st.sidebar:
     st.title('📖 Wortschatz')
     st.caption('你的本地德语词库')
@@ -76,13 +89,38 @@ with st.sidebar:
         tts_input = st.checkbox('无录音时允许 Edge TTS', value=store.get_setting('tts') == '1')
         st.caption('在线查询仅发送输入词语。TTS 会发送该词给 Microsoft。')
         offline_input = st.text_input('本地词典（SQLite / JSONL）', value=store.get_setting('offline_path'))
+        st.subheader('本地德语朗读')
+        speech_input = st.checkbox('无录音时自动生成本地德语发音',
+            value=store.get_setting('offline_speech', '1') == '1', key='offline_speech_input')
+        speech_path_input = st.text_input('本地德语语音目录（D盘）',
+            value=store.get_setting('offline_speech_path') or str(DEFAULT_SPEECH_PATH), key='offline_speech_path_input')
+        st.caption('语音资源放在 D 盘；合成不联网，已有人声录音会保留。')
         st.subheader('Obsidian 逐词笔记（可选）')
         vault_input = st.text_input('Vault 文件夹', value=store.get_setting('vault'), placeholder='选择已有 Vault 的完整路径')
         auto_input = st.checkbox('保存后自动同步', value=store.get_setting('auto_sync') == '1')
         if st.form_submit_button('保存设置'):
-            for key, value in {'online': int(online_input), 'tts': int(tts_input), 'offline_path': offline_input.strip(), 'vault': vault_input.strip(), 'auto_sync': int(auto_input)}.items():
-                store.set_setting(key, value)
-            flash('设置已保存。')
+            if speech_input and Path(speech_path_input.strip()).drive.upper() != 'D:':
+                st.error('本地语音资源目录必须位于 D 盘。')
+            elif speech_input and not speech_available(speech_path_input.strip()):
+                st.error('该目录没有完整的德语语音资源，请检查路径。')
+            else:
+                for key, value in {'online': int(online_input), 'tts': int(tts_input), 'offline_path': offline_input.strip(),
+                    'vault': vault_input.strip(), 'auto_sync': int(auto_input), 'offline_speech': int(speech_input),
+                    'offline_speech_path': speech_path_input.strip()}.items():
+                    store.set_setting(key, value)
+                flash('设置已保存。')
+    speech_path = store.get_setting('offline_speech_path') or str(DEFAULT_SPEECH_PATH)
+    if speech_available(speech_path):
+        st.caption('本地德语语音已就绪 · eSpeak NG · 合成发音')
+    if st.button('补全缺失的离线读音', disabled=not speech_available(speech_path), width='stretch'):
+        with st.spinner('正在本地生成德语发音…'):
+            count, errors = fill_missing(store, DATA_DIR / 'audio', speech_path)
+            if count and store.get_setting('auto_save_word_table') == '1':
+                try:
+                    save_word_table(store, audio_root=DATA_DIR / 'audio')
+                except (OSError, ValueError, RuntimeError) as exc:
+                    errors.append(f'发音已保存，Obsidian 更新失败：{exc}')
+        flash(f'已补全 {count} 条离线读音，已有录音保留。', errors)
     local_path = store.get_setting('offline_path')
     if store.get_setting('online', '1') == '0':
         st.success('运行模式：完全离线')
@@ -129,10 +167,14 @@ if submitted:
     try:
         with st.spinner('正在查询并保存…'):
             row, created, warnings = service.add(new_word, **options)
+            row, audio_created, speech_errors = local_pronunciation(row)
+            if row.get('audio_file'):
+                warnings = clear_missing_audio_warnings(warnings)
+            warnings.extend(speech_errors)
         st.session_state['selected_id'] = row['id']
         st.session_state.pop('entry_picker', None)
         st.session_state.pop('editor_id', None)
-        if created:
+        if created or audio_created:
             warnings.extend(sync_after_edit(row))
         flash('已加入词库。' if created else '此词已在词库中，已打开原词条。', warnings)
     except (OSError, ValueError) as exc:
@@ -159,6 +201,11 @@ with left:
 with right:
     if entry_id is not None:
         row = store.get(entry_id)
+        row, audio_created, speech_errors = local_pronunciation(row)
+        if audio_created:
+            speech_errors.extend(sync_after_edit(row))
+        for speech_error in speech_errors:
+            st.caption(speech_error)
         st.subheader(row['word'])
         if row.get('lookup_status') == 'failed':
             st.error('自动补全失败：在线词典或翻译服务未连通。请检查网络/代理后点击“重新查询”。')
@@ -192,6 +239,8 @@ with right:
                         audio, warnings = providers.audio(row['word'], candidate_map[choice], tts=options['tts'])
                     if audio:
                         row = store.attach_audio(entry_id, audio)
+                row, _, speech_errors = local_pronunciation(row)
+                warnings.extend(speech_errors)
                 st.session_state.pop('editor_id', None)
                 warnings.extend(sync_after_edit(row))
                 flash('已采用所选义项，请核对中文释义。', warnings)
@@ -203,12 +252,13 @@ with right:
             audio_path = (DATA_DIR / 'audio' / row['audio_file']).resolve()
             if audio_path.is_relative_to((DATA_DIR / 'audio').resolve()) and audio_path.is_file() and audio_path.stat().st_size <= 15 * 1024 * 1024:
                 st.audio(audio_path.read_bytes(), format={'.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg', '.wav': 'audio/wav', '.flac': 'audio/flac'}.get(audio_path.suffix, 'audio/mpeg'))
-                st.caption('TTS 合成发音 · 请核对读音' if row['audio_kind'] == 'tts' else '词典录音 · Wikimedia Commons')
+                st.caption('本地德语合成发音 · eSpeak NG · 请核对读音' if row['audio_kind'] == 'offline_tts'
+                    else 'TTS 合成发音 · 请核对读音' if row['audio_kind'] == 'tts' else '词典录音 · Wikimedia Commons')
                 st.caption((row['audio_license'] or '许可待补充') + ' · ' + (row['attribution'] or ''))
             else:
                 st.warning('本地音频文件缺失或路径不安全，请重新获取发音。')
         else:
-            st.caption('暂无录音。可选择义项获取录音，或在设置中启用 TTS。')
+            st.caption('暂无发音。可在设置中启用本地德语朗读，或补全缺失的离线读音。')
         meanings = json.loads(row['meaning_candidates_json'] or '[]')
         if meanings:
             with st.expander('中文释义候选与出处'):
@@ -251,6 +301,10 @@ with right:
             with st.spinner('重新查询词典…'):
                 fields, warnings = providers.lookup(row.get('dictionary_word') or row['word'], force=True, **options)
             row = store.refresh(entry_id, fields)
+            row, _, speech_errors = local_pronunciation(row)
+            if row.get('audio_file'):
+                warnings = clear_missing_audio_warnings(warnings)
+            warnings.extend(speech_errors)
             st.session_state.pop('editor_id', None)
             warnings.extend(sync_after_edit(row))
             message = '已保留词条，自动补全未成功。' if fields.get('lookup_status') == 'failed' else '查询已更新，人工修改已保留。'

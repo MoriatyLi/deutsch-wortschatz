@@ -1,5 +1,15 @@
 # 第三方来源与许可
 
+## 离线德语语音
+
+本地合成使用 D 盘安装的 eSpeak NG 德语声音 `de`，由 `espeakng-loader==0.2.4` Windows x64 分发包提供。引擎及语言数据使用 GPL-3.0-or-later；安装时应保留上游 COPYING 和来源声明。合成发音标明为合成声音，不替代词典真人录音。
+
+- eSpeak NG 源码：https://github.com/espeak-ng/espeak-ng
+- 许可文本：https://github.com/espeak-ng/espeak-ng/blob/master/COPYING
+- Windows 构建源码：https://github.com/thewh1teagle/espeakng-loader
+- 分发包：https://pypi.org/project/espeakng-loader/0.2.4/
+
+
 ## 德语离线词典
 
 `_internal/app_resources/dictionary/de-zh.db` 是对 Kaikki/Wiktextract 提取数据所建的 SQLite 查询索引；保留了对应词条的来源 URL。中文释义源于中文 Wiktionary 的德语词条及其贡献者，索引中的内容没有改成项目代码的许可。
