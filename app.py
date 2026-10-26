@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import sqlite3
 from pathlib import Path
 
 import streamlit as st
@@ -13,6 +14,7 @@ from offline_dictionary import stats as dictionary_stats
 from prepare_offline import activate as activate_offline
 from offline_tts import (DEFAULT_SPEECH_PATH, available as speech_available,
     ensure_audio, fill_missing, clear_missing_audio_warnings)
+from fuzzy_words import suggest as suggest_words
 
 st.set_page_config(page_title='Deutsch Wortschatz · 德语词库', page_icon='📖', layout='wide')
 DATA_DIR = Path(os.environ.get('DEUTSCH_VOCAB_DATA_DIR', BASE_DIR / 'data'))
@@ -160,13 +162,31 @@ if 'flash' in st.session_state:
     for warning in warnings:
         st.warning(warning)
 
-with st.form('add_form', clear_on_submit=True):
-    new_word = st.text_input('德语单词或短语', key='new_word', placeholder='例如 Wasser、sprechen、Guten Morgen')
-    submitted = st.form_submit_button('加入词库', key='add_word', type='primary')
+new_word = st.text_input('德语单词或短语', key='new_word', placeholder='例如 Wasser、sprechen、Guten Morgen',
+    help='输入后按 Enter 或点击其他位置，可查看本地候选词。')
+chosen_word = None
+if new_word.strip() and options['offline_path']:
+    try:
+        suggestions = suggest_words(new_word, options['offline_path'])
+        if suggestions:
+            choices = {item['word']: item for item in suggestions}
+            def candidate_label(value):
+                if value is None:
+                    return '按原输入加入：' + new_word.strip()
+                item = choices[value]
+                return ' · '.join(part for part in (value,item['article'],item['meaning'],item['match']) if part)
+            chosen_word = st.selectbox('你要找的是哪个词？', [None,*choices],
+                format_func=candidate_label,key='word_candidate_' + new_word)
+            st.caption('选择词典中的词形后点击“加入词库”；也可按原输入加入。')
+        else:
+            st.caption('未找到相近词，仍可按原输入加入并手动校对。')
+    except (OSError,ValueError,sqlite3.Error) as exc:
+        st.caption(f'本地候选词暂不可用：{exc}')
+submitted = st.button('加入词库', key='add_word', type='primary')
 if submitted:
     try:
         with st.spinner('正在查询并保存…'):
-            row, created, warnings = service.add(new_word, **options)
+            row, created, warnings = service.add(chosen_word or new_word, **options)
             row, audio_created, speech_errors = local_pronunciation(row)
             if row.get('audio_file'):
                 warnings = clear_missing_audio_warnings(warnings)
